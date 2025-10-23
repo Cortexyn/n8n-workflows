@@ -1,0 +1,179 @@
+{
+  "name": "Thermik EDXE - Premium Dark + Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Daily Trigger 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://my.meteoblue.com/packages/basic-1h_basic-day_current_clouds-1h_clouds-day_sunmoon_air-1h_air-day",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eYFbtAIKhZCjD38o"
+            },
+            {
+              "name": "lat",
+              "value": "52.2851"
+            },
+            {
+              "name": "lon",
+              "value": "7.44055"
+            },
+            {
+              "name": "asl",
+              "value": "41"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            },
+            {
+              "name": "forecast_days",
+              "value": "3"
+            }
+          ]
+        }
+      },
+      "id": "http-meteoblue",
+      "name": "Fetch Meteoblue API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst data = items[0]?.json;\nif (!data) throw new Error('Keine Meteoblue-Daten');\n\nconst palette = {bg:'#0e1621',cardBg:'#1a2332',textPrimary:'#f5e6d3',textSecondary:'#d4e3f0',textTertiary:'#8f98a0',gold:'#FFB300',teal:'#36C3F2',blue:'#1e90ff',border:'#2a3f5f'};\nconst scoreColors = {0:{bg:'#ff6b6b',grad:'linear-gradient(135deg,#ff6b6b,#d32f2f)',label:'Keine Thermik',emoji:'🔴'},1:{bg:'#ff8a65',grad:'linear-gradient(135deg,#ff8a65,#e64a19)',label:'Sehr schwach',emoji:'🔴'},2:{bg:'#ffa726',grad:'linear-gradient(135deg,#ffa726,#f57c00)',label:'Schwach',emoji:'🟠'},3:{bg:'#FFB300',grad:'linear-gradient(135deg,#FFB300,#f57f17)',label:'Brauchbar',emoji:'🟡'},4:{bg:'#66bb6a',grad:'linear-gradient(135deg,#66bb6a,#43a047)',label:'Gut',emoji:'🟢'},5:{bg:'#36C3F2',grad:'linear-gradient(135deg,#36C3F2,#0288d1)',label:'Exzellent',emoji:'🟢'}};\n\nfunction pick(o,...keys){for(const k of keys){if(o&&o[k]!=null)return o[k]}return null}\nfunction mean(arr){const v=arr.filter(x=>Number.isFinite(x));return v.length?v.reduce((s,x)=>s+x,0)/v.length:null}\nfunction round(v,d=1){return v==null?null:Math.round(v*10**d)/10**d}\nfunction pct(v){return v==null?null:Math.round(v)}\nfunction estimateTd(t,rh){return t==null||rh==null?null:t-(100-rh)/5}\nfunction degToCompass(deg){if(deg==null)return'—';const dirs=['N','NE','E','SE','S','SW','W','NW'];const idx=Math.round(deg/45)%8;return dirs[idx];}\n\nfunction parseSeries(j){\n  const d1=j?.data_1h,b1h=j['basic-1h']||j.basic_1h,c1h=j['clouds-1h']||j.clouds_1h,a1h=j['air-1h']||j.air_1h;\n  const time=d1?.time||b1h?.time||a1h?.time||c1h?.time;\n  if(!time)throw new Error('Keine 1h Zeitreihe');\n  return {time,temp:pick(d1,'temperature','temperature_2m')||pick(b1h||a1h,'temperature','temperature_2m','t_2m'),rh:pick(d1,'relative_humidity','relativehumidity_2m')||pick(b1h||a1h,'relative_humidity','relativehumidity_2m'),wind10:pick(d1,'windspeed','windspeed_10m')||pick(b1h||a1h,'windspeed','windspeed_10m'),winddir:pick(d1,'winddirection','winddirection_10m')||pick(b1h||a1h,'winddirection','winddirection_10m'),precip:pick(d1,'precipitation','precipitation_1h')||pick(b1h,'precipitation','precipitation_1h'),tcc:pick(d1,'totalcloudcover_total','totalcloudcover')||pick(c1h,'totalcloudcover_total','totalcloudcover'),sunmin:pick(d1,'sunshine','sunshine_time')||pick(c1h,'sunshine','sunshine_time'),blh:pick(d1,'boundarylayer_height')||pick(a1h,'boundarylayer_height'),cape:pick(d1,'cape')||pick(a1h,'cape'),cin:pick(d1,'cin')||pick(a1h,'cin'),td:pick(d1,'dewpoint_2m')||pick(a1h,'dewpoint_2m')};\n}\n\nfunction groupByDay(times){\n  const out={};\n  for(let i=0;i<times.length;i++){\n    const dt=new Date(times[i]);\n    const k=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;\n    (out[k]||=[]).push(i);\n  }\n  return out;\n}\n\nfunction thermicScore(p){\n  let s=0;\n  const {sun,tcc,rr,blh,cape,cin,wind10,t2m,td2m}=p;\n  if(sun!=null){if(sun>=45)s+=2;else if(sun>=20)s+=1;else if(sun<=5)s-=1}\n  if(tcc!=null){if(tcc<=20)s+=1;else if(tcc>=85)s-=1}\n  if(rr!=null){if(rr>0)s-=(rr>=1?2:1)}\n  if(blh!=null){if(blh>=1800)s+=2;else if(blh>=1200)s+=1;else if(blh<600)s-=1}\n  if(cape!=null){if(cape>=50&&cape<=600)s+=1;if(cape>800)s-=1}\n  if(cin!=null&&cin<-50)s-=1;\n  if(wind10!=null){if(wind10>=2&&wind10<=6)s+=1;else if(wind10>9)s-=1}\n  if(t2m!=null&&td2m!=null){const spread=t2m-td2m;if(spread>=6&&spread<=12)s+=1;else if(spread<3)s-=1}\n  return Math.max(0,Math.min(5,Math.round(s)));\n}\n\nfunction climbFromPhysics(p){\n  const cape=Math.max(0,p.cape||0),blh_km=Math.max(0,(p.blh||0)/1000),sunFrac=Math.max(0,Math.min(1,(p.sun||0)/60)),tccFrac=Math.max(0,Math.min(1,(p.tcc||0)/100)),rr=Math.max(0,p.precip||0),wind=Math.max(0,p.wind||0);\n  let w=0.02*Math.sqrt(cape)+0.6*blh_km+0.3*sunFrac;\n  w-=0.8*tccFrac;w-=0.5*Math.min(rr,2.0);w-=Math.max(0,wind-8)*0.08;\n  return Math.max(0,Math.min(w,5.0));\n}\n\nfunction labelForScore(sc){\n  if(sc<=0)return 'Thermik 0/5. Praktisch keine nutzbaren Bärte.';\n  if(sc===1)return 'Thermik 1/5. Fetzen, selten zentrierbar.';\n  if(sc===2)return 'Thermik 2/5. Schwach, kurzlebig.';\n  if(sc===3)return 'Thermik 3/5. Brauchbar mit Arbeit.';\n  if(sc===4)return 'Thermik 4/5. Gut, teils kräftig.';\n  return 'Thermik 5/5. Sehr gut.';\n}\n\nfunction buildClimbBoxHTML(idxs,series){\n  const hours=idxs.map(i=>({i,h:new Date(series.time[i]).getHours()})).filter(x=>x.h>=7&&x.h<=19);\n  const uniqueHours=[...new Set(hours.map(x=>x.h))].sort((a,b)=>a-b);\n  const climbData=uniqueHours.map(h=>{\n    const idx=hours.find(x=>x.h===h)?.i;\n    if(idx==null)return{h,climb:0};\n    const sun=series.sunmin?.[idx]||0,tcc=series.tcc?.[idx]||0,rr=series.precip?.[idx]||0,blh=series.blh?.[idx]||0,cape=series.cape?.[idx]||0,wind10=series.wind10?.[idx]||0;\n    const climb=climbFromPhysics({sun,tcc,precip:rr,blh,cape,wind:wind10});\n    return{h,climb};\n  });\n  const maxClimb=Math.max(2.5,...climbData.map(x=>x.climb));\n  const rows=climbData.map(d=>{\n    const barWidth=Math.round((d.climb/maxClimb)*180);\n    return`<tr><td style=\"padding:3px 8px;font-size:10px;font-weight:600;color:${palette.textSecondary};text-align:right;width:35px\">${String(d.h).padStart(2,'0')}h</td><td style=\"padding:3px 4px\"><div style=\"width:${barWidth}px;max-width:180px;height:10px;background:#66bb6a;border:1px solid ${palette.border};border-radius:4px\"></div></td><td style=\"padding:3px 8px;font-size:10px;color:${palette.textSecondary}\">${round(d.climb,1)} m/s</td></tr>`;\n  }).join('');\n  return`<div style=\"background:#1a2332;border:1px solid ${palette.border};border-radius:10px;padding:12px;margin-top:10px\"><div style=\"font-size:13px;font-weight:600;margin-bottom:8px;color:${palette.textPrimary}\">📊 Steigwerte (CAPE/BLH)</div><table role=\"presentation\" style=\"width:100%;border-collapse:collapse\">${rows}</table></div>`;\n}\n\nfunction buildPhaseBlocks(idxs,series){\n  const phases=[{key:'morning',label:'Vormittag (08–12 Uhr)',icon:'☀️',from:8,to:12},{key:'early',label:'Früher Nachmittag (12–15 Uhr)',icon:'🌤️',from:12,to:15},{key:'late',label:'Später Nachmittag (15–18 Uhr)',icon:'⛅',from:15,to:18},{key:'eve',label:'Abends (nach 18 Uhr)',icon:'🌙',from:18,to:21}];\n  const blocks=[];\n  for(const phase of phases){\n    const pickIdx=idxs.filter(i=>{const h=new Date(series.time[i]).getHours();return h>=phase.from&&h<phase.to});\n    if(!pickIdx.length)continue;\n    const avgField=(field)=>{if(!field)return null;return mean(pickIdx.map(i=>field[i]).filter(Number.isFinite))};\n    const t2m=avgField(series.temp),rh=avgField(series.rh),td2m=series.td?avgField(series.td):estimateTd(t2m,rh),tcc=avgField(series.tcc),rr=avgField(series.precip)??0,blh=avgField(series.blh),cape=avgField(series.cape),cin=avgField(series.cin),wind10=avgField(series.wind10),winddir=avgField(series.winddir),sun=avgField(series.sunmin);\n    const score=thermicScore({sun,tcc,rr,blh,cape,cin,wind10,t2m,td2m});\n    const windStr=wind10!=null?`🌬️ Wind: ~${round(wind10)} m/s aus ${degToCompass(winddir)}`:'🌬️ Wind: —';\n    const lines=[];\n    if(phase.key==='morning'){\n      lines.push(`• Bewölkung ${pct(tcc)} %, Schauer ${round(rr)} mm/h, BLH ~${round((blh||0)/1000)} km`);\n      lines.push(`• ${windStr}`);\n      lines.push(`• ${labelForScore(score)}`);\n    }else if(phase.key==='early'){\n      lines.push(`• Bewölkung ${pct(tcc)} %, ggf. Schauerpeak, BLH bis ~${round((blh||0)/1000)} km`);\n      lines.push(`• ${windStr}`);\n      lines.push(`• CAPE ~${Math.round(cape||0)} J/kg`);\n      lines.push(`• ${labelForScore(score)}`);\n    }else if(phase.key==='late'){\n      lines.push(`• Schauertrend ↓, TCC ~${pct(tcc)} %, BLH ~${round((blh||0)/1000)} km`);\n      lines.push(`• ${windStr}`);\n      lines.push(`• Bestes Tagesfenster → ${labelForScore(score)}`);\n    }else{\n      const adjusted=Math.max(0,score-1);\n      lines.push(`• Einstrahlung ↓, BLH fällt`);\n      lines.push(`• ${windStr}`);\n      lines.push(`• ${labelForScore(adjusted)} Ende`);\n    }\n    blocks.push({icon:phase.icon,title:phase.label,lines,score,wind:windStr});\n  }\n  return blocks;\n}\n\nfunction buildPhaseHTML(blocks,maxLinesGlobal){\n  return blocks.map(block=>{\n    const paddedLines=[...block.lines];\n    while(paddedLines.length<maxLinesGlobal){\n      paddedLines.push('&nbsp;');\n    }\n    return`<div style=\"background:#1a2332;border:1px solid ${palette.border};border-radius:10px;padding:12px;margin-top:10px\"><div style=\"font-size:14px;font-weight:600;color:${palette.textPrimary};margin-bottom:6px\">${block.icon} ${block.title}</div>${paddedLines.map(line=>`<div style=\"font-size:12px;color:${palette.textSecondary};line-height:1.6;margin:2px 0\">${line}</div>`).join('')}</div>`;\n  }).join('');\n}\n\nconst series=parseSeries(data);\nconst daysMap=groupByDay(series.time);\nconst dayKeys=Object.keys(daysMap).sort().slice(0,3);\nif(!dayKeys.length)throw new Error('Keine Tagesfenster');\n\nconst dateFormatter=new Intl.DateTimeFormat('de-DE',{weekday:'long',day:'2-digit',month:'2-digit',timeZone:'Europe/Berlin'});\nconst days=dayKeys.map(key=>{\n  const idxs=daysMap[key];\n  const dateMid=new Date(key+'T12:00:00Z');\n  const title=dateFormatter.format(dateMid);\n  const dayIdx=idxs.filter(i=>{const h=new Date(series.time[i]).getHours();return h>=7&&h<=19});\n  const maxScore=dayIdx.length?Math.max(...dayIdx.map(i=>{\n    const t2m=series.temp?.[i],rh=series.rh?.[i],td2m=series.td?.[i]??estimateTd(t2m,rh);\n    return thermicScore({sun:series.sunmin?.[i],tcc:series.tcc?.[i],rr:series.precip?.[i]||0,blh:series.blh?.[i],cape:series.cape?.[i],cin:series.cin?.[i],wind10:series.wind10?.[i],t2m,td2m});\n  })):0;\n  const phases=buildPhaseBlocks(idxs,series);\n  const climbHTML=buildClimbBoxHTML(idxs,series);\n  const totalLines=phases.reduce((sum,p)=>sum+p.lines.length,0);\n  return {key,title,maxScore,idxs,phases,climbHTML,phaseCount:phases.length,totalLines};\n});\nconst maxLinesPerPhaseGlobal=Math.max(...days.flatMap(d=>d.phases.map(p=>p.lines.length)));\n\nconst firstDate=dateFormatter.format(new Date(dayKeys[0]+'T12:00:00Z'));\nconst lastDate=dateFormatter.format(new Date(dayKeys[dayKeys.length-1]+'T12:00:00Z'));\nconst subject=`🌤️ Thermik EDXE (${firstDate} – ${lastDate})`;\n\nconst html=`<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>${subject}</title></head>\n<body style=\"margin:0;padding:0;background:${palette.bg};color:${palette.textPrimary};font-family:Arial,sans-serif\">\n<table role=\"presentation\" style=\"width:100%;border-collapse:collapse;background:${palette.bg}\">\n<tr><td align=\"center\" style=\"padding:0\">\n<table role=\"presentation\" style=\"max-width:1100px;width:100%;border-collapse:collapse\">\n<tr><td style=\"background:linear-gradient(135deg,${palette.teal} 0%,${palette.blue} 100%);border-radius:16px 16px 0 0;padding:24px;text-align:center\">\n<h1 style=\"font-size:38px;color:#fff;margin:0;text-shadow:0 3px 10px rgba(0,0,0,0.4)\">🌤️ Thermik-Vorhersage EDXE</h1>\n<p style=\"font-size:17px;color:#fff;opacity:0.9;margin:8px 0 0\">${firstDate} – ${lastDate}</p>\n<div style=\"display:inline-block;background:rgba(255,255,255,0.2);padding:6px 16px;border-radius:20px;margin-top:12px;font-size:14px;color:#fff\">3 Tage | ⚡ Live-Daten</div>\n</td></tr>\n<tr><td style=\"padding:20px 10px\"><table role=\"presentation\" style=\"width:100%;border-collapse:collapse\">\n<tr>${days.map(day=>`<td style=\"width:33.33%;padding:8px;vertical-align:top;height:100%\">\n<table style=\"width:100%;height:100%;border-collapse:collapse;background:linear-gradient(135deg,${palette.cardBg} 0%,${palette.bg} 100%);border:2px solid ${palette.border};border-radius:16px;box-shadow:0 6px 20px rgba(0,0,0,0.5)\">\n<tr><td style=\"padding:16px;vertical-align:top\">\n<h3 style=\"font-size:20px;color:${palette.textPrimary};margin:0 0 12px;text-align:center\">${day.title}</h3>\n<div style=\"background:${scoreColors[day.maxScore].grad};color:#fff;padding:16px;border-radius:12px;text-align:center;box-shadow:0 6px 16px rgba(0,0,0,0.6);border:2px solid #fff;margin-bottom:16px\">\n<div style=\"font-size:42px;font-weight:bold;text-shadow:0 2px 4px rgba(0,0,0,0.3)\">${day.maxScore}<span style=\"font-size:24px;opacity:0.8\">/5</span></div>\n<div style=\"font-size:16px;margin-top:6px\">${scoreColors[day.maxScore].emoji} ${scoreColors[day.maxScore].label}</div>\n</div>\n${day.climbHTML}\n${buildPhaseHTML(day.phases,maxLinesPerPhaseGlobal)}\n</td></tr></table>\n</td>`).join('')}</tr>\n</table></td></tr>\n<tr><td style=\"text-align:center;padding:20px;border-top:1px solid ${palette.border}\">\n<p style=\"font-size:13px;color:${palette.textTertiary};margin:0\">📊 Datenquelle: <a href=\"https://meteoblue.com\" style=\"color:${palette.teal};text-decoration:none\">Meteoblue API</a><br>\n<span style=\"font-size:11px;opacity:0.7\">🤖 Automatisch generiert um 07:00 Uhr</span></p>\n</td></tr>\n</table></td></tr></table>\n</body></html>`;\n\nfunction buildClimbTextTelegram(idxs,series){\n  const hours=idxs.map(i=>({i,h:new Date(series.time[i]).getHours()})).filter(x=>x.h>=7&&x.h<=19);\n  const uniqueHours=[...new Set(hours.map(x=>x.h))].sort((a,b)=>a-b);\n  const climbData=uniqueHours.map(h=>{\n    const idx=hours.find(x=>x.h===h)?.i;\n    if(idx==null)return null;\n    const sun=series.sunmin?.[idx]||0,tcc=series.tcc?.[idx]||0,rr=series.precip?.[idx]||0,blh=series.blh?.[idx]||0,cape=series.cape?.[idx]||0,wind10=series.wind10?.[idx]||0;\n    const climb=climbFromPhysics({sun,tcc,precip:rr,blh,cape,wind:wind10});\n    return{h,climb};\n  }).filter(Boolean);\n  const peaks=climbData.filter(d=>d.climb>=1.5).slice(0,3);\n  if(peaks.length===0)return'📊 Steigwerte: schwach (unter 1.5 m/s)';\n  return`📊 Steigwerte: ${peaks.map(p=>`${String(p.h).padStart(2,'0')}h=${round(p.climb,1)}m/s`).join(', ')}`;\n}\n\nconst telegramText=`🌤️ <b>Thermik EDXE | ${firstDate.split(',')[1].trim()} – ${lastDate.split(',')[1].trim()}</b>\\n\\n${days.map(day=>`<b>${scoreColors[day.maxScore].emoji} ${day.title}</b>\\nScore: <code>${day.maxScore}/5</code> – ${scoreColors[day.maxScore].label}\\n${buildClimbTextTelegram(day.idxs,series)}\\n\\n${day.phases.map(p=>`${p.icon} <b>${p.title}</b>\\n${p.lines.join('\\n')}\\n`).join('\\n')}\\n`).join('\\n')}🤖 <i>Meteoblue API | Generiert 07:00</i>`;\n\nreturn [{json:{subject,html,telegram_chat_id:'5716776863',telegram_text:telegramText,telegram_parse_mode:'HTML'}}];\n"
+      },
+      "id": "code-generate",
+      "name": "Generate Email + Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "iwoelfchen@gmail.com",
+        "toEmail": "iwoelfchen@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}"
+      },
+      "id": "email-send",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        260
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "Gmail SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.telegram_chat_id }}",
+        "text": "={{ $json.telegram_text }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "telegram-send",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        900,
+        340
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "2",
+          "name": "EDXE Thermik Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily Trigger 07:00": {
+      "main": [
+        [
+          {
+            "node": "Fetch Meteoblue API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Meteoblue API": {
+      "main": [
+        [
+          {
+            "node": "Generate Email + Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Email + Telegram": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-23T00:00:00.000Z",
+  "versionId": "1"
+}
