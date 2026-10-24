@@ -60,8 +60,12 @@ n8n start
 ### 3. Credentials konfigurieren
 
 **meteoblue API:**
-- API-Key unter https://www.meteoblue.com/en/weather-api beantragen
-- Im Workflow unter "Fetch Meteoblue API" eintragen
+1. API-Key unter https://www.meteoblue.com/en/weather-api beantragen
+2. In n8n unter **Credentials** ein neues **HTTP Query Auth** Credential anlegen
+3. Als Query-Parameter-Name `apikey` und als Wert den API-Key eintragen
+4. Im Node "Fetch Meteoblue API" dieses Credential auswählen
+
+Der API-Key gehört ausschließlich in das verschlüsselte n8n Credential und niemals direkt in den Workflow oder das Repository.
 
 **Telegram Bot:**
 1. Bot erstellen: Mit [@BotFather](https://t.me/botfather) sprechen
@@ -81,7 +85,16 @@ n8n start
    - Port: 587
    - User: deine@gmail.com
    - Password: App-Passwort
-3. Sender- und Empfänger-Email im Workflow anpassen
+3. Das SMTP-Credential im Node "Send Email" auswählen
+4. Sender- und Empfänger-Email im Workflow anpassen
+
+> **Wichtig:** Ein bereits öffentlich gewordener API-Key muss beim Anbieter widerrufen und durch einen neuen Key ersetzt werden. Das Entfernen aus dem aktuellen Workflow macht einen veröffentlichten Key nicht wieder sicher. Der alte Wert bleibt außerdem in der Git-Historie, solange diese nicht separat und bewusst bereinigt wird.
+
+### Umgang mit Credentials
+
+- Die öffentliche Workflow-Datei enthält keine Secret-Werte und keine instanzspezifischen Credential-Verweise.
+- Nach dem Import müssen Meteoblue-, Telegram- und SMTP-Credentials in der eigenen n8n-Instanz ausgewählt werden.
+- Vor jedem Commit sollte der aktuelle Repository-Stand mit einem Secret-Scanner geprüft werden.
 
 ### 4. Standort anpassen
 
